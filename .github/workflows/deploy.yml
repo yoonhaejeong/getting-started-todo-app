@@ -1,0 +1,45 @@
+# main 브랜치에 push하면 backend 이미지를 빌드해서 Cloud Run에 자동 배포합니다.
+# mysql 사이드카 컨테이너는 그대로 두고 backend 컨테이너만 교체합니다.
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: project-28e51140-f0a1-4988-9e4
+  REGION: asia-northeast3
+  SERVICE: getting-started-todo-app
+  IMAGE: asia-northeast3-docker.pkg.dev/project-28e51140-f0a1-4988-9e4/cloud-run-source-deploy/getting-started-todo-app_backend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/932417131313/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: github-deployer@project-28e51140-f0a1-4988-9e4.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        run: |
+          gcloud auth configure-docker asia-northeast3-docker.pkg.dev --quiet
+          docker build --target final -t "$IMAGE:${{ github.sha }}" .
+          docker push "$IMAGE:${{ github.sha }}"
+
+      - name: Deploy backend container
+        run: |
+          gcloud run deploy "$SERVICE" \
+            --project "$PROJECT_ID" \
+            --region "$REGION" \
+            --container backend \
+            --image "$IMAGE:${{ github.sha }}"
