@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  # 1. 백엔드 애플리케이션
+  backend:
+    build:
+      context: ./
+      target: final
+    ports:
+      - "8080:3000" # Cloud Run 외부 트래픽 포트(8080) -> 컨테이너 실행 포트(3000)
+    environment:
+      # PORT는 Cloud Run이 자동으로 주입하므로 직접 정의하지 않습니다.
+      # 같은 Cloud Run 서비스(인스턴스) 내부에서는 localhost(127.0.0.1)로 사이드카 DB에 접근 가능
+      MYSQL_HOST: "127.0.0.1"
+      MYSQL_USER: "root"
+      MYSQL_PASSWORD: "secret"
+      MYSQL_DB: "todos"
+    depends_on:
+      - mysql
+    x-google-cloudrun:
+      ingress-container: true # 외부 트래픽을 수신하는 인그레스 컨테이너로 지정
+
+  # 2. MySQL 사이드카 컨테이너 (데이터는 인스턴스 재시작 시 초기화됨)
+  mysql:
+    image: mysql:9.3
+    ports:
+      - "3306:3306" # Cloud Run 의존성 검사를 위해 포트 정의 필수
+    environment:
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_DATABASE: todos

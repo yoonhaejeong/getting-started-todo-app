@@ -1,0 +1,123 @@
+###################################################
+# This Compose file provides the development environment for the todo app.
+# 
+# Seeing the final version of the application bundles the frontend with the
+# backend, we are able to "simulate" that by using a proxy to route requests
+# to the appropriate service. All requests to /api will be routed to the 
+# backend while all other requests will be sent to the client service. While
+# there is some overlap in the routing rules, the proxy determines the service
+# based on the most specific rule.
+#
+# To support easier debugging and troubleshooting, phpMyAdmin is also included
+# to provide a web interface to the MySQL database.
+###################################################
+
+###################################################
+# Services
+#
+# The services define the individual components of our application stack.
+# For each service, a separate container will be launched.
+###################################################
+services:
+
+  ###################################################
+  # Service: proxy (Traefik v3.6)
+  #
+  # Reverse proxy configured to listen on port 80 and route traffic
+  # to client (Vite: 5173), backend (Node.js: 3000), and phpMyAdmin.
+  ###################################################
+  proxy:
+    image: traefik:v3.6
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=true
+      - --entrypoints.web.address=:80
+    ports:
+      - 80:80
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  ###################################################
+  # Service: backend
+  ###################################################
+  backend:
+    build:
+      context: ./
+      target: backend-dev
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: secret
+      MYSQL_DB: todos
+    depends_on:
+      mysql:
+        condition: service_healthy
+    develop:
+      watch:
+        - path: ./backend/src
+          action: sync
+          target: /usr/local/app/src
+        - path: ./backend/package.json
+          action: rebuild
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.backend.entrypoints: "web"
+      traefik.http.routers.backend.rule: "PathPrefix(`/api`)"
+      traefik.http.services.backend.loadbalancer.server.port: "3000"
+
+  ###################################################
+  # Service: client
+  ###################################################
+  client:
+    build:
+      context: ./
+      target: client-dev
+    develop:
+      watch:
+        - path: ./client/src
+          action: sync
+          target: /usr/local/app/src
+        - path: ./client/package.json
+          action: rebuild
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.client.entrypoints: "web"
+      traefik.http.routers.client.rule: "PathPrefix(`/`)"
+      traefik.http.services.client.loadbalancer.server.port: "5173"
+
+  ###################################################
+  # Service: mysql
+  ###################################################
+  mysql:
+    image: mysql:9.3
+    volumes:
+      - todo-mysql-data:/var/lib/mysql
+    environment: 
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_DATABASE: todos
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ###################################################
+  # Service: phpmyadmin
+  ###################################################
+  phpmyadmin:
+    image: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: root
+      PMA_PASSWORD: secret
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.phpmyadmin.entrypoints: "web"
+      traefik.http.routers.phpmyadmin.rule: "Host(`db.localhost`) || PathPrefix(`/phpmyadmin`)"
+      traefik.http.services.phpmyadmin.loadbalancer.server.port: "80"
+
+###################################################
+# Volumes
+###################################################
+volumes:
+  todo-mysql-data:
